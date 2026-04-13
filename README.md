@@ -1,6 +1,5 @@
 # Mocap Key Pose Extractor
 
-Thank you .BVH dataset from Bandai-Namco and project.py is trial for me to understand this topic.
 A Maya Python tool that automatically reduces dense motion capture keyframes down to only the essential poses, making mocap data editable for animators.
 
 ## Overview
@@ -25,11 +24,19 @@ The extraction pipeline combines PCA-based dimensionality reduction, geometric c
 
 The tool provides an interactive Maya UI with sliders for epsilon, subsample step, smoothing window, and minimum gap, plus a toggle for ROM validation. All operations are wrapped in a single undo chunk for safe iteration.
 
+## File Descriptions
+
+- **maya_script.py** — The main production script, designed to run directly inside Autodesk Maya. This is the actual tool that performs keyframe extraction on mocap data within the Maya environment.
+- **project.py** — A standalone practice script used to study and experiment with the underlying concepts outside of Maya. This file helped me build an understanding of the math and algorithms before integrating them into the Maya pipeline.
+
 ## Tools & Technologies
 
 - **Autodesk Maya** — 3D animation and motion capture host environment
-- **Python ** — Scripting language used via Maya
+- **Python** — Scripting language used via Maya
 
+## Acknowledgments
+
+Special thanks to **Bandai Namco Research** for providing the .BVH motion capture dataset used in this project.
 
 ## Author
 
