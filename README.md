@@ -1,0 +1,1 @@
+# Pose_Extraction_from_Motion_Capture_maya
