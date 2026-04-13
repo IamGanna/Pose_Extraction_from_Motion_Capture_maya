@@ -102,32 +102,74 @@ def distance_3d(p1, p2):
 # ==========================================
 # 2. MAYA DATA EXTRACTION
 # ==========================================
-
-def calculate_motion_energy(joints, start_frame, end_frame):
-    energy_curve = []
-    prev_positions = []
-
-    cmds.currentTime(start_frame)
-    for j in joints:
-        prev_positions.append(
-            cmds.xform(j, query=True, worldSpace=True, translation=True)
-        )
-    energy_curve.append(0.0)
-
-    for frame in range(start_frame + 1, end_frame + 1):
+def check_legit(joints, keyframes, start_frame, end_frame):
+    ROM_LIMITS = {
+        "leftupleg":     {"rx": (-30, 120), "ry": (-45, 45), "rz": (-45, 30)},
+        "rightupleg":    {"rx": (-30, 120), "ry": (-45, 45), "rz": (-30, 45)},
+        "leftleg":       {"rx": (0, 150),   "ry": (-5, 5),   "rz": (-5, 5)},
+        "rightleg":      {"rx": (0, 150),   "ry": (-5, 5),   "rz": (-5, 5)},
+        "leftfoot":      {"rx": (-40, 50),  "ry": (-20, 20), "rz": (-30, 30)},
+        "rightfoot":     {"rx": (-40, 50),  "ry": (-20, 20), "rz": (-30, 30)},
+        "spine":         {"rx": (-30, 40),  "ry": (-30, 30), "rz": (-30, 30)},
+        "spine1":        {"rx": (-30, 40),  "ry": (-30, 30), "rz": (-30, 30)},
+        "spine2":        {"rx": (-30, 40),  "ry": (-30, 30), "rz": (-30, 30)},
+        "head":          {"rx": (-40, 40),  "ry": (-60, 60), "rz": (-40, 40)},
+        "neck":          {"rx": (-30, 30),  "ry": (-50, 50), "rz": (-30, 30)},
+        "leftarm":       {"rx": (-180, 60), "ry": (-50, 180),"rz": (-90, 90)},
+        "rightarm":      {"rx": (-180, 60), "ry": (-180, 50),"rz": (-90, 90)},
+        "leftforearm":   {"rx": (0, 160),   "ry": (-5, 5),   "rz": (-90, 90)},
+        "rightforearm":  {"rx": (0, 160),   "ry": (-5, 5),   "rz": (-90, 90)},
+    }
+    frames = set()
+    check_frames = set(range(start_frame, end_frame + 1)) - set(keyframes)
+    
+    for frame in check_frames:
         cmds.currentTime(frame)
-        current_energy = 0.0
-        current_positions = []
+        for j in joints:
+            name = j.split(":")[-1].lower()
+            if name in ROM_LIMITS:
+                rot = cmds.getAttr(j + ".rotate")[0]
+                limits = ROM_LIMITS[name]
+                
+                rx_min, rx_max = limits["rx"]
+                ry_min, ry_max = limits["ry"]
+                rz_min, rz_max = limits["rz"]
+                
+                if (rot[0] < rx_min or rot[0] > rx_max or
+                    rot[1] < ry_min or rot[1] > ry_max or
+                    rot[2] < rz_min or rot[2] > rz_max):
+                    frames.add(frame)
+                    break
+    
+    return frames
 
+def reconstruction_error(joints, original_positions, keyframes, start_frame, end_frame):
+    errors = []
+    check_frames = set(range(start_frame, end_frame + 1)) - set(keyframes)
+
+    for frame in check_frames:
+        cmds.currentTime(frame)
+        idx = frame - start_frame
+        original = original_positions[idx]
+
+        frame_error = 0.0
         for i, j in enumerate(joints):
             pos = cmds.xform(j, query=True, worldSpace=True, translation=True)
-            current_positions.append(pos)
-            current_energy += distance_3d(pos, prev_positions[i])
+            orig = original[i * 3: i * 3 + 3]
+            frame_error += distance_3d(pos, orig)
 
-        energy_curve.append(current_energy)
-        prev_positions = current_positions
+        avg_joint_error = frame_error / len(joints)
+        errors.append(avg_joint_error)
 
-    return energy_curve
+    if errors:
+        mean_error = sum(errors) / len(errors)
+        max_error = max(errors)
+        print(f"  Reconstruction error:")
+        print(f"    Mean: {mean_error:.3f} units per joint")
+        print(f"    Max:  {max_error:.3f} units per joint")
+        return mean_error
+    return 0.0
+
 def PCA_energy(joints, startframe, endframe):
     out = []
     for frame in range(startframe,endframe+1):
@@ -143,13 +185,13 @@ def PCA_energy(joints, startframe, endframe):
     eigenvalues, eigenvectors = np.linalg.eigh(covariance_matrix)
     first_component = eigenvectors[:,-1]
     pca_curve = centered @ first_component
-    return pca_curve.tolist()
+    return pca_curve.tolist() , out
 
 def extract_key_poses(joints, epsilon, subsample_step=2, smooth_window=11, min_gap=5):
     start_frame = int(cmds.playbackOptions(query=True, minTime=True))
     end_frame = int(cmds.playbackOptions(query=True, maxTime=True))
 
-    raw_energy = PCA_energy(joints, start_frame, end_frame)
+    raw_energy,original_pose = PCA_energy(joints, start_frame, end_frame)
     smoothed_energy = smooth_data_moving_average(raw_energy, window_size=smooth_window)
 
     sampled = subsample_energy(smoothed_energy, step=subsample_step)
@@ -209,7 +251,7 @@ def extract_key_poses(joints, epsilon, subsample_step=2, smooth_window=11, min_g
     print(f"  Inflection (transitions):   {len(critical_sub['inflection'])} frames")
     print(f"  RDP key frames:             {len(rdp_frames)} frames")
 
-    return key_frames, start_frame, end_frame
+    return key_frames, start_frame, end_frame , original_pos
 
 
 # ==========================================
@@ -227,8 +269,8 @@ def run_extraction_tool(*args):
     smooth_val = int(cmds.intSliderGrp("smooth_slider", query=True, value=True))
     gap_val = int(cmds.intSliderGrp("gap_slider", query=True, value=True))
 
-    print("Analyzing motion curve...")
-    key_frames, start_f, end_f = extract_key_poses(
+    print("Analyzing motion curve (PCA)...")
+    key_frames, start_f, end_f , original_pose = extract_key_poses(
         joints, epsilon_val,
         subsample_step=subsample_val,
         smooth_window=smooth_val,
@@ -240,6 +282,18 @@ def run_extraction_tool(*args):
         all_frames = set(range(start_f, end_f + 1))
         for frame in all_frames - set(key_frames):
             cmds.cutKey(joints, time=(frame, frame), clear=True)
+
+        # ROM validation — after deletion, check interpolated frames
+        print("  Validating ROM constraints...")
+        violations = check_legit(joints, key_frames, start_f, end_f)
+        if violations:
+            print(f"  Found {len(violations)} ROM violations — re-inserting keys...")
+            for frame in violations:
+                cmds.setKeyframe(joints, time=frame)
+            key_frames = sorted(set(key_frames) | set(violations))
+        else:
+            print("  No ROM violations found.")
+        reconstruction_error(joints, original_pose, key_frames, start_f, end_f)
     finally:
         cmds.undoInfo(closeChunk=True)
 
