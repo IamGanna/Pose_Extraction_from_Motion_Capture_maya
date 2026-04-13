@@ -1,5 +1,6 @@
 # Mocap Key Pose Extractor
 
+Thank you .BVH dataset from Bandai-Namco and project.py is trial for me to understand this topic.
 A Maya Python tool that automatically reduces dense motion capture keyframes down to only the essential poses, making mocap data editable for animators.
 
 ## Overview
