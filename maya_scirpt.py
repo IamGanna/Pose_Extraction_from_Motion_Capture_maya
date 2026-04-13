@@ -143,8 +143,9 @@ def check_legit(joints, keyframes, start_frame, end_frame):
     
     return frames
 
-def reconstruction_error(joints, original_positions, keyframes, start_frame, end_frame):
+def reconstruction_error(joints, original_positions, keyframes, start_frame, end_frame, fix_threshold=2.0):
     errors = []
+    violations = []
     check_frames = set(range(start_frame, end_frame + 1)) - set(keyframes)
 
     for frame in check_frames:
@@ -161,14 +162,17 @@ def reconstruction_error(joints, original_positions, keyframes, start_frame, end
         avg_joint_error = frame_error / len(joints)
         errors.append(avg_joint_error)
 
+        if avg_joint_error > fix_threshold:
+            violations.append(frame)
+
     if errors:
         mean_error = sum(errors) / len(errors)
         max_error = max(errors)
         print(f"  Reconstruction error:")
         print(f"    Mean: {mean_error:.3f} units per joint")
         print(f"    Max:  {max_error:.3f} units per joint")
-        return mean_error
-    return 0.0
+
+    return sorted(violations)
 
 def PCA_energy(joints, startframe, endframe):
     out = []
@@ -251,7 +255,7 @@ def extract_key_poses(joints, epsilon, subsample_step=2, smooth_window=11, min_g
     print(f"  Inflection (transitions):   {len(critical_sub['inflection'])} frames")
     print(f"  RDP key frames:             {len(rdp_frames)} frames")
 
-    return key_frames, start_frame, end_frame , original_pos
+    return key_frames, start_frame, end_frame , original_pose
 
 
 # ==========================================
@@ -283,17 +287,16 @@ def run_extraction_tool(*args):
         for frame in all_frames - set(key_frames):
             cmds.cutKey(joints, time=(frame, frame), clear=True)
 
-        # ROM validation — after deletion, check interpolated frames
-        print("  Validating ROM constraints...")
-        violations = check_legit(joints, key_frames, start_f, end_f)
+        print("  Checking reconstruction quality...")
+        violations = reconstruction_error(joints, original_pose, key_frames, start_f, end_f, fix_threshold=2.0)
         if violations:
-            print(f"  Found {len(violations)} ROM violations — re-inserting keys...")
+            print(f"  Found {len(violations)} frames with high error — re-inserting keys...")
             for frame in violations:
                 cmds.setKeyframe(joints, time=frame)
             key_frames = sorted(set(key_frames) | set(violations))
         else:
-            print("  No ROM violations found.")
-        reconstruction_error(joints, original_pose, key_frames, start_f, end_f)
+            print("  All interpolated frames within tolerance.")
+
     finally:
         cmds.undoInfo(closeChunk=True)
 
